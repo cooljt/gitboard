@@ -8,14 +8,22 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/google/go-github/github"
 	"github.com/robfig/cron"
+	"github.com/rs/cors"
 )
+
+type redisHandler struct {
+	client redisClient
+}
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", okHandler)
+
 	redisService := initRedisClient()
 	githubService := initGithubAPIClient()
 	cronService := initGronjobClient()
+	redisHandler := redisHandler{
+		client: redisService,
+	}
 
 	searchTerm := make(map[string]string)
 	searchTerm["machinelearning"] = "python"
@@ -23,8 +31,12 @@ func main() {
 	cronService.addGitHubFetchingFunc(redisService, githubService, searchTerm)
 	cronService.scheduleAndStart()
 
+	mux.HandleFunc("/", redisHandler.pythonHandler)
 	log.Println("Listening on 4000....")
-	http.ListenAndServe(":4000", limit(mux))
+
+	limitHandler := limit(mux)
+	finalHanlder := cors.Default().Handler(limitHandler)
+	http.ListenAndServe(":4000", finalHanlder)
 }
 
 func initRedisClient() redisClient {
@@ -55,6 +67,11 @@ func initGronjobClient() cronClient {
 	return client
 }
 
-func okHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("ok"))
+func (handler redisHandler) pythonHandler(w http.ResponseWriter, r *http.Request) {
+	redisClient := handler.client
+	info, _ := redisClient.get("python")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+	w.Write([]byte(info))
 }
